@@ -1,0 +1,14 @@
+<html>
+<head>
+<script type="text/javascript" src="WebAudioHelper.js"></script>
+<script type="text/javascript">
+  var sound = new SoundEffect("test2.mp3");
+</script>
+</head>
+<body>
+<button onclick="sound.play();">Start</button>
+<button onclick="sound.stop();">Stop</button>
+<button onclick="sound.pause();">Pause</button>
+<button onclick="alert(sound.isPlaying());">IsPlaying</button>
+</body>
+</html>
