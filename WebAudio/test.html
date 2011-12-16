@@ -2,13 +2,22 @@
 <head>
 <script type="text/javascript" src="WebAudioHelper.js"></script>
 <script type="text/javascript">
-  var sound = new SoundEffect("test2.mp3");
+  var sound = new AudioClip("test.mp3");
+  var soundLooping = new AudioClip("test.mp3", false, true);
 </script>
 </head>
 <body>
-<button onclick="sound.play();">Start</button>
+Non-looping sound:<br />
+<button onclick="sound.play();">Play</button>
 <button onclick="sound.stop();">Stop</button>
 <button onclick="sound.pause();">Pause</button>
+<button onclick="sound.playAsSFX();">Play as SFX</button>
 <button onclick="alert(sound.isPlaying());">IsPlaying</button>
+<br />
+Looping sound:<br />
+<button onclick="soundLooping.play();">Play</button>
+<button onclick="soundLooping.stop();">Stop</button>
+<button onclick="soundLooping.pause();">Pause</button>
+<button onclick="alert(soundLooping.isPlaying());">IsPlaying</button>
 </body>
 </html>

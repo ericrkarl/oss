@@ -15,7 +15,7 @@
  */
 
 /**
- * Create a new SoundEffect object from a source URL. This object can be played,
+ * Create a new AudioClip object from a source URL. This object can be played,
  * paused, stopped, and resumed, like the HTML5 Audio element.
  *
  * @constructor
@@ -23,12 +23,14 @@
  * @param {boolean=} opt_autoplay
  * @param {boolean=} opt_loop
  */
-SoundEffect = function(src, opt_autoplay, opt_loop) {
+AudioClip = function(src, opt_autoplay, opt_loop) {
 
-  // At construction time, the SoundEffect is not paused or playing (stopped),
+  // At construction time, the AudioClip is not paused or playing (stopped),
   // and has no offset recorded.
   this.playing_ = false;
+  this.resetTimout_ = null;
   this.startTime_ = 0;
+  this.pauseTime_ = 0;
   this.loop_ = opt_loop ? true : false;
 
   // Create an XHR to load the audio data.
@@ -39,64 +41,129 @@ SoundEffect = function(src, opt_autoplay, opt_loop) {
   var sfx = this;
   request.onload = function() {
     // When audio data is ready, we create a WebAudio buffer from the data.
-    sfx.buffer_ = SoundEffect.context.createBuffer(request.response, true);
-    
-    if (opt_autoplay) {
-      sfx.play();
-    }
+    AudioClip.context.decodeAudioData(request.response, function(buffer) {
+      sfx.buffer_ = buffer;
+
+      if (opt_autoplay) {
+        sfx.play();
+      }
+    });
   }
 
   request.send();
 }
 
-// Create a global context for all our SoundEffects to use and attach it to the
+// Create a global context for all our AudioClips to use and attach it to the
 // base object.
-SoundEffect.context = new webkitAudioContext();
+AudioClip.context = new webkitAudioContext();
 
 /**
- * Recreates the audio graph. Each source can only be played once (bug?), so
+ * Recreates the audio graph. Each source can only be played once, so
  * we must recreate the source each time we want to play.
+ * @return {BufferSource}
+ * @param {boolean=} loop
  */
-SoundEffect.prototype.createGraph = function() {
-  this.source_ = SoundEffect.context.createBufferSource();
-  this.source_.buffer = this.buffer_;
-  this.source_.connect(SoundEffect.context.destination);
+AudioClip.prototype.createGraph = function(loop) {
+  var source = AudioClip.context.createBufferSource();
+  source.buffer = this.buffer_;
+  source.connect(AudioClip.context.destination);
 
   // Looping is handled by the Web Audio API.
-  this.source_.loop = this.loop_;
+  source.loop = loop;
+
+  return source;
 }
 
 /**
-* Plays the given SoundEffect.
+* Plays the given AudioClip. Clips played in this manner can be stopped
+* or paused/resumed.
 */
-SoundEffect.prototype.play = function() {
-  if (this.buffer_ && !this.playing_) {
+AudioClip.prototype.play = function() {
+  if (this.resetTimeout_ != null || (this.buffer_ && !this.isPlaying())) {
     // Record the start time so we know how long we've been playing.
-    this.startTime_ = SoundEffect.context.currentTime;
+    this.startTime_ = AudioClip.context.currentTime;
     this.playing_ = true;
-    this.createGraph();
-    this.source_.noteOn(0);
+    this.resetTimeout_ = null;
+
+    // If the clip is paused, we need to resume it.
+    if (this.pauseTime_ > 0) {
+      this.startTime_ -= this.pauseTime_;
+      var remainingTime = this.buffer_.duration - this.pauseTime_;
+
+      // If the clip is paused and looping, we need to resume the clip
+      // with looping disabled. Once the clip has finished, we will re-start
+      // the clip from the beginning with looping enabled.
+      if (this.loop_) {
+        this.source_ = this.createGraph(false);
+        this.source_.noteGrainOn(0, this.pauseTime_, remainingTime)
+
+        // Handle restarting the playback once the resumed clip has completed.
+        var clip = this;
+        this.resetTimeout_ = setTimeout(function() { clip.play() },
+                                      remainingTime * 1000);
+      } else {
+        this.source_ = this.createGraph(this.loop_);
+        this.source_.noteGrainOn(0, this.pauseTime_, remainingTime);
+      }
+
+      this.pauseTime_ = 0;
+    } else {
+      this.source_ = this.createGraph(this.loop_);
+      this.source_.noteOn(0);
+    }
   }
 }
 
+/**
+ * Plays the given AudioClip as a sound effect. Sound Effects cannot be stopped
+ * or paused/resumed, but can be played multiple times with overlap. 
+ * Additionally, sound effects cannot be looped, as there is no way to stop 
+ * them. This method of playback is best suited to very short, one-off sounds.
+ */
+AudioClip.prototype.playAsSFX = function() {
+  if (this.buffer_) {
+    var source = this.createGraph(false);
+    source.noteOn(0);
+  }
+}
 /**
 * Stops a sound effect, resetting its seek position to 0.
 */
-SoundEffect.prototype.stop = function() {
+AudioClip.prototype.stop = function() {
   if (this.playing_) {
     this.source_.noteOff(0);
+    this.playing_ = false;
+    this.startTime_ = 0;
+    this.pauseTime_ = 0;
+    if (this.resetTimeout_ != null) {
+      clearTimeout(this.resetTimeout_);
+    }
   }
+}
 
-  this.playing_ = false;
-  this.startTime_ = 0;
+/**
+* Pauses a sound effect.
+*/
+AudioClip.prototype.pause = function() {
+  if (this.playing_) {
+    this.source_.noteOff(0);
+    this.playing_ = false;
+    this.pauseTime_ = AudioClip.context.currentTime - this.startTime_;
+    this.pauseTime_ = this.pauseTime_ % this.buffer_.duration;
+    this.startTime_ = 0;
+    if (this.resetTimeout_ != null) {
+      clearTimeout(this.resetTimeout_);
+    }
+  }
 }
 
 /**
 * Indicates whether the sound is playing.
 * @return {boolean}
 */
-SoundEffect.prototype.isPlaying = function() {
-  var playTime = (SoundEffect.context.currentTime - this.startTime_);
+AudioClip.prototype.isPlaying = function() {
+  var playTime = this.pauseTime_ +
+                 (AudioClip.context.currentTime - this.startTime_);
 
-  return this.playing_ && (playTime < this.buffer_.duration);
+  return this.playing_ && (this.loop_ || (playTime < this.buffer_.duration));
 }
