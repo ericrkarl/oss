@@ -24,14 +24,15 @@
  * @param {boolean=} opt_loop
  */
 AudioClip = function(src, opt_autoplay, opt_loop) {
-
-  // At construction time, the AudioClip is not paused or playing (stopped),
+  // At construction time, the AudioClip is not playing (stopped),
   // and has no offset recorded.
   this.playing_ = false;
-  this.resetTimout_ = null;
   this.startTime_ = 0;
-  this.pauseTime_ = 0;
   this.loop_ = opt_loop ? true : false;
+
+  // State to handle pause/resume, and some of the intricacies of looping.
+  this.resetTimout_ = null;
+  this.pauseTime_ = 0;
 
   // Create an XHR to load the audio data.
   var request = new XMLHttpRequest();
@@ -41,6 +42,8 @@ AudioClip = function(src, opt_autoplay, opt_loop) {
   var sfx = this;
   request.onload = function() {
     // When audio data is ready, we create a WebAudio buffer from the data.
+    // Using decodeAudioData allows for async audio loading, which is useful
+    // when loading longer audio tracks (music).
     AudioClip.context.decodeAudioData(request.response, function(buffer) {
       sfx.buffer_ = buffer;
 
@@ -87,27 +90,32 @@ AudioClip.prototype.play = function() {
 
     // If the clip is paused, we need to resume it.
     if (this.pauseTime_ > 0) {
+      // We are resuming a clip, so it's current playback time is not correctly 
+      // indicated by startTime_. Correct this by subtracting pauseTime_.
       this.startTime_ -= this.pauseTime_;
       var remainingTime = this.buffer_.duration - this.pauseTime_;
 
-      // If the clip is paused and looping, we need to resume the clip
-      // with looping disabled. Once the clip has finished, we will re-start
-      // the clip from the beginning with looping enabled.
       if (this.loop_) {
+        // If the clip is paused and looping, we need to resume the clip
+        // with looping disabled. Once the clip has finished, we will re-start
+        // the clip from the beginning with looping enabled
         this.source_ = this.createGraph(false);
         this.source_.noteGrainOn(0, this.pauseTime_, remainingTime)
 
         // Handle restarting the playback once the resumed clip has completed.
         var clip = this;
         this.resetTimeout_ = setTimeout(function() { clip.play() },
-                                      remainingTime * 1000);
+                                        remainingTime * 1000);
       } else {
+        // Paused non-looping case, just create the graph and play the sub-
+        // region using noteGrainOn.
         this.source_ = this.createGraph(this.loop_);
         this.source_.noteGrainOn(0, this.pauseTime_, remainingTime);
       }
 
       this.pauseTime_ = 0;
     } else {
+      // Normal case, just creat the graph and play.
       this.source_ = this.createGraph(this.loop_);
       this.source_.noteOn(0);
     }
@@ -126,8 +134,9 @@ AudioClip.prototype.playAsSFX = function() {
     source.noteOn(0);
   }
 }
+
 /**
-* Stops a sound effect, resetting its seek position to 0.
+* Stops an AudioClip , resetting its seek position to 0.
 */
 AudioClip.prototype.stop = function() {
   if (this.playing_) {
@@ -142,7 +151,8 @@ AudioClip.prototype.stop = function() {
 }
 
 /**
-* Pauses a sound effect.
+* Pauses an AudioClip. The offset into the stream is recorded to allow the
+* clip to be resumed later.
 */
 AudioClip.prototype.pause = function() {
   if (this.playing_) {
